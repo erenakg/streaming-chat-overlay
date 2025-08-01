@@ -4,22 +4,20 @@ Transparent Streaming Chat Overlay
 Creates an always-on-top, click-through overlay window that displays a chat widget.
 """
 
-import tkinter as tk
-from tkinter import messagebox
+import webview
 import win32gui
 import win32con
-import webview
-import threading
 import sys
-import os
+import time
+import threading
 from urllib.parse import urlparse
 
 class ChatOverlay:
-    def __init__(self, chat_url="https://botrix.live/embed/chat"):
+    def __init__(self, chat_url="https://kick.com/popout/deashad/chat"):
         self.chat_url = chat_url
-        self.root = None
         self.webview_window = None
         self.window_handle = None
+        self.click_through_enabled = True
         
     def validate_url(self, url):
         """Validate the provided URL"""
@@ -29,161 +27,161 @@ class ChatOverlay:
         except:
             return False
     
-    def create_overlay_window(self):
-        """Create the main Tkinter overlay window"""
-        self.root = tk.Tk()
+    def find_webview_window(self):
+        """Find the webview window handle"""
+        def enum_windows_callback(hwnd, windows):
+            if win32gui.IsWindowVisible(hwnd):
+                window_text = win32gui.GetWindowText(hwnd)
+                if "Chat Widget" in window_text or "pywebview" in window_text.lower():
+                    windows.append(hwnd)
+            return True
         
-        # Configure window properties
-        self.root.title("Chat Overlay")
-        self.root.overrideredirect(True)  # Remove window decorations
-        self.root.attributes('-topmost', True)  # Always on top
-        self.root.attributes('-alpha', 0.01)  # Make nearly transparent (can't be 0 or webview won't work)
-        
-        # Get screen dimensions and make fullscreen
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        
-        self.root.geometry(f"{screen_width}x{screen_height}+0+0")
-        self.root.configure(bg='black')
-        
-        # Create a frame to hold the webview
-        self.webview_frame = tk.Frame(self.root, bg='black')
-        self.webview_frame.pack(fill=tk.BOTH, expand=True)
-        
-        return screen_width, screen_height
+        windows = []
+        win32gui.EnumWindows(enum_windows_callback, windows)
+        return windows[0] if windows else None
     
     def apply_click_through(self):
         """Apply Windows-specific flags to make the window click-through"""
-        try:
-            # Get the window handle
-            self.window_handle = win32gui.FindWindow(None, "Chat Overlay")
+        attempts = 0
+        max_attempts = 10
+        
+        while attempts < max_attempts:
+            self.window_handle = self.find_webview_window()
             
             if self.window_handle:
-                # Get current window style
-                current_style = win32gui.GetWindowLong(self.window_handle, win32con.GWL_EXSTYLE)
-                
-                # Add layered and transparent flags
-                new_style = current_style | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT
-                
-                # Apply the new style
-                win32gui.SetWindowLong(self.window_handle, win32con.GWL_EXSTYLE, new_style)
-                
-                # Set window transparency
-                win32gui.SetLayeredWindowAttributes(
-                    self.window_handle, 
-                    0,  # Color key (not used)
-                    255,  # Alpha value (255 = opaque)
-                    win32con.LWA_ALPHA
-                )
-                
-                print("Click-through mode activated!")
-                return True
-            else:
-                print("Warning: Could not find window handle")
-                return False
-                
-        except Exception as e:
-            print(f"Error applying click-through: {e}")
-            return False
-    
-    def create_webview(self, width, height):
-        """Create the webview in a separate thread"""
-        def webview_thread():
-            try:
-                # Create webview window
-                self.webview_window = webview.create_window(
-                    title='Chat Widget',
-                    url=self.chat_url,
-                    width=width,
-                    height=height,
-                    x=0,
-                    y=0,
-                    resizable=True,
-                    fullscreen=False,
-                    shadow=False,
-                    on_top=True,
-                    transparent=True
-                )
-                
-                # Start webview
-                webview.start(debug=False)
-                
-            except Exception as e:
-                print(f"Error creating webview: {e}")
-                messagebox.showerror("Error", f"Failed to create webview: {e}")
-        
-        # Start webview in separate thread
-        webview_thread_obj = threading.Thread(target=webview_thread, daemon=True)
-        webview_thread_obj.start()
-    
-    def setup_keyboard_shortcuts(self):
-        """Setup keyboard shortcuts for controlling the overlay"""
-        def toggle_click_through(event=None):
-            """Toggle click-through mode on/off"""
-            if self.window_handle:
-                current_style = win32gui.GetWindowLong(self.window_handle, win32con.GWL_EXSTYLE)
-                
-                if current_style & win32con.WS_EX_TRANSPARENT:
-                    # Remove click-through
-                    new_style = current_style & ~win32con.WS_EX_TRANSPARENT
+                try:
+                    # Get current window style
+                    current_style = win32gui.GetWindowLong(self.window_handle, win32con.GWL_EXSTYLE)
+                    
+                    # Add layered and transparent flags
+                    new_style = current_style | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST
+                    
+                    # Apply the new style
                     win32gui.SetWindowLong(self.window_handle, win32con.GWL_EXSTYLE, new_style)
-                    print("Click-through disabled")
-                else:
-                    # Enable click-through
-                    new_style = current_style | win32con.WS_EX_TRANSPARENT
-                    win32gui.SetWindowLong(self.window_handle, win32con.GWL_EXSTYLE, new_style)
-                    print("Click-through enabled")
+                    
+                    # Make window always on top
+                    win32gui.SetWindowPos(
+                        self.window_handle,
+                        win32con.HWND_TOPMOST,
+                        0, 0, 0, 0,
+                        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                    )
+                    
+                    print("✅ Click-through mode activated!")
+                    print("✅ Window set to always on top!")
+                    return True
+                    
+                except Exception as e:
+                    print(f"❌ Error applying window properties: {e}")
+                    
+            attempts += 1
+            time.sleep(0.5)
         
-        def close_overlay(event=None):
-            """Close the overlay"""
-            print("Closing overlay...")
-            if self.webview_window:
+        print("⚠️  Warning: Could not find webview window for click-through")
+        return False
+    
+    def setup_keyboard_monitoring(self):
+        """Setup keyboard monitoring for shortcuts"""
+        def monitor_keys():
+            import keyboard
+            
+            def toggle_click_through():
+                if self.window_handle:
+                    try:
+                        current_style = win32gui.GetWindowLong(self.window_handle, win32con.GWL_EXSTYLE)
+                        
+                        if current_style & win32con.WS_EX_TRANSPARENT:
+                            # Remove click-through
+                            new_style = current_style & ~win32con.WS_EX_TRANSPARENT
+                            win32gui.SetWindowLong(self.window_handle, win32con.GWL_EXSTYLE, new_style)
+                            print("🔓 Click-through disabled - You can now interact with the chat")
+                            self.click_through_enabled = False
+                        else:
+                            # Enable click-through
+                            new_style = current_style | win32con.WS_EX_TRANSPARENT
+                            win32gui.SetWindowLong(self.window_handle, win32con.GWL_EXSTYLE, new_style)
+                            print("🔒 Click-through enabled - Clicks will pass through")
+                            self.click_through_enabled = True
+                    except Exception as e:
+                        print(f"❌ Error toggling click-through: {e}")
+            
+            def close_overlay():
+                print("🚪 Closing overlay...")
                 webview.destroy()
-            self.root.quit()
-            sys.exit(0)
+                sys.exit(0)
+            
+            # Register hotkeys
+            try:
+                keyboard.add_hotkey('ctrl+t', toggle_click_through)
+                keyboard.add_hotkey('ctrl+q', close_overlay)
+                keyboard.add_hotkey('esc', close_overlay)
+                print("⌨️  Keyboard shortcuts registered")
+            except:
+                print("⚠️  Warning: Could not register keyboard shortcuts")
         
-        # Bind keyboard shortcuts
-        self.root.bind('<Control-t>', toggle_click_through)  # Ctrl+T to toggle click-through
-        self.root.bind('<Control-q>', close_overlay)  # Ctrl+Q to quit
-        self.root.bind('<Escape>', close_overlay)  # Escape to quit
-        
-        # Make sure the window can receive focus for keyboard events
-        self.root.focus_force()
+        try:
+            import keyboard
+            thread = threading.Thread(target=monitor_keys, daemon=True)
+            thread.start()
+        except ImportError:
+            print("⚠️  Warning: 'keyboard' module not available. Install with: pip install keyboard")
     
     def run(self):
         """Start the chat overlay application"""
-        print("Starting Chat Overlay...")
-        print(f"Loading URL: {self.chat_url}")
+        print("🚀 Starting Kick Chat Overlay...")
+        print(f"🌐 Loading URL: {self.chat_url}")
         
         # Validate URL
         if not self.validate_url(self.chat_url):
-            print("Error: Invalid URL provided")
+            print("❌ Error: Invalid URL provided")
             return
         
         try:
-            # Create the overlay window
-            width, height = self.create_overlay_window()
+            # Get screen dimensions
+            import tkinter as tk
+            root = tk.Tk()
+            screen_width = root.winfo_screenwidth()
+            screen_height = root.winfo_screenheight()
+            root.destroy()
             
-            # Setup keyboard shortcuts
-            self.setup_keyboard_shortcuts()
+            print(f"📱 Screen resolution: {screen_width}x{screen_height}")
             
-            # Apply click-through after a short delay
-            self.root.after(1000, self.apply_click_through)
+            # Setup keyboard monitoring
+            self.setup_keyboard_monitoring()
             
-            # Create webview
-            self.create_webview(width, height)
+            # Create webview window
+            self.webview_window = webview.create_window(
+                title='Chat Widget',
+                url=self.chat_url,
+                width=screen_width,
+                height=screen_height,
+                x=0,
+                y=0,
+                resizable=True,
+                fullscreen=False,
+                shadow=False,
+                on_top=True,
+                transparent=False  # We'll handle transparency via Win32 API
+            )
             
-            print("\nOverlay Controls:")
+            print("\n🎮 Overlay Controls:")
             print("- Ctrl+T: Toggle click-through mode")
-            print("- Ctrl+Q or Escape: Close overlay")
-            print("- The overlay should now be visible and click-through")
+            print("- Ctrl+Q or Esc: Close overlay")
+            print("- Wait 2 seconds for click-through to activate...")
             
-            # Start the Tkinter main loop
-            self.root.mainloop()
+            # Apply click-through after webview is created
+            def apply_after_delay():
+                time.sleep(2)
+                self.apply_click_through()
+            
+            delay_thread = threading.Thread(target=apply_after_delay, daemon=True)
+            delay_thread.start()
+            
+            # Start webview (this will block until window is closed)
+            webview.start(debug=False)
             
         except Exception as e:
-            print(f"Error starting overlay: {e}")
-            messagebox.showerror("Error", f"Failed to start overlay: {e}")
+            print(f"❌ Error starting overlay: {e}")
 
 def main():
     """Main entry point"""
@@ -193,10 +191,10 @@ def main():
     # Check if URL was provided as command line argument
     if len(sys.argv) > 1:
         chat_url = sys.argv[1]
-        print(f"Using provided URL: {chat_url}")
+        print(f"🔗 Using provided URL: {chat_url}")
     else:
         chat_url = default_url
-        print(f"Using default Kick chat URL: {chat_url}")
+        print(f"🔗 Using default Kick chat URL: {chat_url}")
     
     # Create and run the overlay
     overlay = ChatOverlay(chat_url)
